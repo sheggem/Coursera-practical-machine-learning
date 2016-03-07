@@ -1,0 +1,142 @@
+---
+title: 'Practical Machine Learning Assignment Prediction Assignment Writeup'
+author: "Sølve Heggem"
+date: "6 mars 2016"
+output: 
+  html_document: 
+    fig_height: 10
+    fig_width: 10
+---
+
+## Background
+This is an assignment for the Coursera Course: <https://www.coursera.org/learn/practical-machine-learning>. 
+We will use data from <http://groupware.les.inf.puc-rio.br/har> (see the section on the Weight Lifting Exercise Dataset).
+
+## Introduction  
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.  
+
+Using the data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants, we will try to predict the manner in which they did the exercise.  
+
+## Preparing Data  
+```{r, cache = T}
+library(RCurl)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+```
+
+### Download Data
+```{r, cache = T}
+#The training data for this project are available here:
+trainingDataUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+#The test data are available here:
+testingDataUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+trainingDataFileName <- "pml-training.csv"
+testingDataFileName <- "pml-testing.csv"
+
+#Only download if not exists
+if (!file.exists(trainingDataFileName)) {
+  download.file(trainingDataUrl, destfile=trainingDataFileName, method="libcurl")
+}
+if (!file.exists(testingDataFileName)) {
+  download.file(testingDataUrl, destfile=testingDataFileName, method="libcurl")
+}
+```
+
+###Load data
+After we have downloaded the data, we can have a look at the size + different columns
+```{r, cache = T}
+trainingData <- read.csv(trainingDataFileName)
+testingData <- read.csv(testingDataFileName)
+dim(trainingData)
+dim(testingData)
+colnames(trainingData)
+```
+We see that we have 19622 rows with 160 variables in the training data set. 
+The testing data set contains 20 rows also with 160 variables.
+We want to predict the 'classe' variable.
+
+
+##Clean the data
+Before we try to predict, we need to clean the data.
+
+###Remove columns with missing values.
+```{r, cache = T}
+trainingData <- trainingData[, colSums(is.na(trainingData)) == 0] 
+testingData <- testingData[, colSums(is.na(testingData)) == 0] 
+```
+
+###Remove columns without only numeric, but we need to keep classe
+```{r, cache = T}
+classe <- trainingData$classe 
+trainingData <- trainingData[, sapply(trainingData, is.numeric)] 
+testingData <- testingData[, sapply(testingData, is.numeric)]  
+trainingData$classe <- classe
+```
+
+###Remove columns that seems to be not relevant due to the type of values.
+```{r, cache = T}
+trainingData <- trainingData[, !grepl("^X|timestamp|window", names(trainingData))] 
+testingData <- testingData[, !grepl("^X|timestamp|window", names(testingData))]  
+```
+
+```{r, cache = T}
+dim(trainingData)
+dim(testingData)
+colnames(trainingData)
+```
+After we have cleaned the data, we have gone from 160 variables to only 53. 
+
+We now need to set an seed value to be able to reproduce the results.
+We want to split the trainingData in two (2) parts to be able to do training and validation.
+```{r, cache = T}
+set.seed(12345) 
+inTrain <- createDataPartition(trainingData$classe, p=0.70, list=F)
+trainData <- trainingData[inTrain, ]
+testData <- trainingData[-inTrain, ]
+```
+
+##The modelling
+We want to use **Random Forest** algoritm to fit a model using 5-fold cross validation. This due to the fact that Random forest is quite good when it comes to avoiding overfitting and is quite easy to fit.
+```{r, cache = T}
+trainControl <- trainControl(method="cv", 5)
+model <- train(classe ~ ., data=trainData, method="rf", trControl=trainControl, ntree=250)
+model
+```
+
+Then predict the performance of the model on the testData.  
+```{r, cache = T}
+predict <- predict(model, testData)
+confusionMatrix(testData$classe, predict)
+```
+
+```{r, cache = T}
+accuracy <- postResample(predict, testData$classe)
+accuracy
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, predict)$overall[1])
+oose
+```
+Estimated accuracy of the model is 98.74% and the estimated out-of-sample error is 1,26%.
+
+## Predicting for TestingData Set
+Last we use the model to predict classe on the original testing data set.
+```{r, cache = T}
+result <- predict(model, testingData)
+result
+```  
+
+##Apendix plots
+a) Correlation Matrix plot
+```{r, cache = T}
+corrPlot <- cor(trainData[, -length(names(trainData))])
+corrplot(corrPlot, method="color")
+```
+
+b) Decision Tree plot
+```{r, cache = T}
+decisionTree <- rpart(classe ~ ., data=trainData, method="class")
+prp(decisionTree) 
+```
